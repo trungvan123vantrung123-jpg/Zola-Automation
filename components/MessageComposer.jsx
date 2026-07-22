@@ -16,15 +16,8 @@ import {
  * Props:
  *  - content: string
  *  - onChange: (content: string) => void
- *  - aiAutoSpin: boolean
- *  - onAiAutoSpinChange: (value: boolean) => void
  */
-export default function MessageComposer({
-  content,
-  onChange,
-  aiAutoSpin,
-  onAiAutoSpinChange,
-}) {
+export default function MessageComposer({ content, onChange }) {
   const textareaRef = useRef(null);
   const [openMenu, setOpenMenu] = useState(null); // null | "word" | "icon"
 
@@ -136,18 +129,6 @@ export default function MessageComposer({
       />
 
       <p className="link-warning">TUYỆT ĐỐI KHÔNG gửi nội dung chứa link (bất kể link gì)</p>
-
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          checked={aiAutoSpin}
-          onChange={(e) => onAiAutoSpinChange(e.target.checked)}
-        />
-        <span>
-          Tự động spin thêm kịch bản bằng AI Losa247
-          <span className="field-hint-inline"> (áp dụng song song với các bộ spin đã chèn ở trên)</span>
-        </span>
-      </label>
     </section>
   );
 }

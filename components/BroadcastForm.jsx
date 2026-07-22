@@ -14,7 +14,6 @@ const initialState = {
   asset: null, // { asset_id, asset_name }
   userList: [], // string[]
   content: "",
-  aiAutoSpin: false,
   attachments: [], // { url, name }[]
   speedMin: 1,
   speedMax: 2,
@@ -47,7 +46,7 @@ export default function BroadcastForm() {
       user_number_list: form.userList,
       message: {
         content: form.content,
-        ai_auto_spin: form.aiAutoSpin,
+        ai_auto_spin: false,
       },
       attachments: form.attachments.map((a) => ({ url: a.url, name: a.name })),
       speed_min: form.speedMin,
@@ -104,8 +103,6 @@ export default function BroadcastForm() {
       <MessageComposer
         content={form.content}
         onChange={(content) => setForm((f) => ({ ...f, content }))}
-        aiAutoSpin={form.aiAutoSpin}
-        onAiAutoSpinChange={(aiAutoSpin) => setForm((f) => ({ ...f, aiAutoSpin }))}
       />
 
       <AttachmentUploader
