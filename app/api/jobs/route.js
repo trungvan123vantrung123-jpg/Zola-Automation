@@ -10,7 +10,7 @@ export async function GET(req) {
   const status = params.get("status") || "all";
   if (status !== "all" && !STATUSES.has(status)) return NextResponse.json({ error: "Trạng thái không hợp lệ." }, { status: 400 });
 
-  let query = supabaseAdmin.from("jobs").select("id, status, input, result, error_message, created_at, updated_at", { count: "exact" }).order("created_at", { ascending: false }).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+  let query = supabaseAdmin.from("jobs").select("id, status, input, error_message, created_at, updated_at", { count: "exact" }).order("created_at", { ascending: false }).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   if (status !== "all") query = query.eq("status", status);
   const [{ data, error, count }, processing, done, failed, total] = await Promise.all([
     query,
@@ -21,7 +21,7 @@ export async function GET(req) {
   const jobs = (data || []).map((job) => ({
     id: job.id, status: job.status, error_message: job.error_message,
     created_at: job.created_at, updated_at: job.updated_at,
-    asset_id: job.result?.summary?.assetID || job.input?.asset_id || "Không xác định",
+    asset_id: job.input?.asset_id || "Không xác định",
     asset_name: job.input?.asset_name || "Không xác định",
     recipient_count: Array.isArray(job.input?.user_number_list) ? job.input.user_number_list.length : 0,
     message_preview: job.input?.message?.content || "",
