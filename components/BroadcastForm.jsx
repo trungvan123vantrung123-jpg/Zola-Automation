@@ -6,6 +6,7 @@ import UserListInput from "./UserListInput";
 import MessageComposer from "./MessageComposer";
 import AttachmentUploader from "./AttachmentUploader";
 import SpeedControl from "./SpeedControl";
+import JobResultDashboard from "./JobResultDashboard";
 import { validateUserList, MAX_USER_COUNT } from "@/lib/userListParser";
 import { useJobPolling } from "@/lib/useJobPolling";
 
@@ -148,14 +149,7 @@ function JobStatusBanner({ jobState }) {
   }
 
   if (jobState.status === "done") {
-    return (
-      <div className="status-banner status-banner-done">
-        Hoàn tất! Job <code>{jobState.jobId}</code> đã xử lý xong.
-        {jobState.result && (
-          <pre className="status-result">{JSON.stringify(jobState.result, null, 2)}</pre>
-        )}
-      </div>
-    );
+    return <JobResultDashboard result={jobState.result} jobId={jobState.jobId} />;
   }
 
   if (jobState.status === "error") {

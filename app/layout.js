@@ -1,4 +1,5 @@
 import "./globals.css";
+import AppNavigation from "@/components/AppNavigation";
 
 export const metadata = {
   title: "Bảng điều khiển gửi tin nhắn",
@@ -8,7 +9,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="vi">
-      <body>{children}</body>
+      <body>
+        <AppNavigation />
+        {children}
+      </body>
     </html>
   );
 }
