@@ -71,3 +71,7 @@ body,button,input,select,textarea{font-family:var(--font-body);font-style:normal
 .page-title,.panel-title,.result-title,.history-toolbar h2,.detail-summary h2,.app-brand strong{font-family:var(--font-display);font-style:normal;line-height:1.35}
 .page-title{letter-spacing:-.015em}.panel-title{letter-spacing:-.005em}.page-subtitle,.notice-box,.field-hint,.history-toolbar p,.result-meta{line-height:1.65}
 select,option,input,textarea{font-style:normal!important}
+
+/* Guaranteed system sans-serif stack */
+:root{--font-display:"Segoe UI",Arial,"Helvetica Neue",sans-serif;--font-body:"Segoe UI",Arial,"Helvetica Neue",sans-serif}
+html,body,button,input,select,option,textarea{font-family:"Segoe UI",Arial,"Helvetica Neue",sans-serif!important;font-style:normal!important;font-synthesis:none}
