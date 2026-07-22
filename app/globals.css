@@ -64,3 +64,10 @@ body *{font-style:normal}
 .dropdown-panel{border-color:#c7d1de}.dropdown-item{font-weight:500}
 .field-hint{color:#667085}.field-error,.field-warning{font-weight:600}
 @media(max-width:720px){.page-title{font-size:25px}.panel{padding:20px 16px}.toolbar{padding:10px}.submit-bar{padding:14px}.page-shell{padding-top:26px}}
+
+/* Vietnamese-first typography */
+:root{--font-display:var(--font-be-vietnam-pro),"Segoe UI",Arial,sans-serif;--font-body:var(--font-be-vietnam-pro),"Segoe UI",Arial,sans-serif}
+body,button,input,select,textarea{font-family:var(--font-body);font-style:normal;font-synthesis:none}
+.page-title,.panel-title,.result-title,.history-toolbar h2,.detail-summary h2,.app-brand strong{font-family:var(--font-display);font-style:normal;line-height:1.35}
+.page-title{letter-spacing:-.015em}.panel-title{letter-spacing:-.005em}.page-subtitle,.notice-box,.field-hint,.history-toolbar p,.result-meta{line-height:1.65}
+select,option,input,textarea{font-style:normal!important}
