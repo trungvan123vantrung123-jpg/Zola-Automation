@@ -9,6 +9,9 @@ import {
   extractNumbersFromExcelRows,
 } from "@/lib/userListParser";
 
+const MAX_EXCEL_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_EXCEL_ROWS = 1000;
+
 /**
  * Vùng 2 - Danh sách người nhận.
  * Hỗ trợ 2 cách nhập, kết quả cuối cùng luôn quy về mảng userList (string[])
@@ -39,11 +42,17 @@ export default function UserListInput({ userList, onChange }) {
     if (!file) return;
     setFileName(file.name);
 
+    if (file.size > MAX_EXCEL_SIZE_BYTES) {
+      setValidation({ valid: false, error: "File Excel vượt quá 2MB.", cleaned: [] });
+      onChange([]);
+      return;
+    }
+
     try {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array" });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "", range: 0 }).slice(0, MAX_EXCEL_ROWS);
 
       const numbers = extractNumbersFromExcelRows(rows);
 

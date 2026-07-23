@@ -12,7 +12,7 @@ import { useRef, useState } from "react";
  *  - attachments: { url: string, name: string }[]
  *  - onChange: (list) => void
  */
-export default function AttachmentUploader({ attachments, onChange }) {
+export default function AttachmentUploader({ attachments, onChange, onUploadingChange }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
@@ -23,6 +23,7 @@ export default function AttachmentUploader({ attachments, onChange }) {
 
     setError(null);
     setUploading(true);
+    onUploadingChange?.(true);
 
     const uploaded = [];
     const failedNames = [];
@@ -43,7 +44,13 @@ export default function AttachmentUploader({ attachments, onChange }) {
           continue;
         }
 
-        uploaded.push({ url: data.url, name: data.name });
+        uploaded.push({
+          url: data.url,
+          name: data.name,
+          path: data.path,
+          bucket: data.bucket,
+          size: data.size,
+        });
       } catch (err) {
         failedNames.push(file.name);
       }
@@ -55,11 +62,22 @@ export default function AttachmentUploader({ attachments, onChange }) {
 
     onChange([...attachments, ...uploaded]);
     setUploading(false);
+    onUploadingChange?.(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function removeAttachment(url) {
-    onChange(attachments.filter((a) => a.url !== url));
+  async function removeAttachment(attachment) {
+    onChange(attachments.filter((item) => item.url !== attachment.url));
+    if (!attachment.path) return;
+    try {
+      await fetch("/api/delete-attachment", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: attachment.path }),
+      });
+    } catch (error) {
+      console.error("Không thể xóa attachment khỏi storage:", error);
+    }
   }
 
   return (
@@ -91,7 +109,7 @@ export default function AttachmentUploader({ attachments, onChange }) {
               <button
                 type="button"
                 className="attachment-remove-btn"
-                onClick={() => removeAttachment(a.url)}
+                onClick={() => removeAttachment(a)}
                 aria-label={`Xoá ${a.name}`}
               >
                 ×

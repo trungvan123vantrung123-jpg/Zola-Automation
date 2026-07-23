@@ -14,6 +14,7 @@ const initialState = {
   asset: null, // { asset_id, asset_name }
   userList: [], // string[]
   content: "",
+  aiAutoSpin: false,
   attachments: [], // { url, name }[]
   speedMin: 1,
   speedMax: 2,
@@ -23,6 +24,7 @@ export default function BroadcastForm() {
   const [form, setForm] = useState(initialState);
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const { jobState, startPolling, reset } = useJobPolling();
 
   const userListValidation = useMemo(
@@ -37,6 +39,7 @@ export default function BroadcastForm() {
     form.content.trim().length > 0 &&
     form.speedMax >= form.speedMin &&
     !submitting &&
+    !uploadingAttachments &&
     jobState.status !== "processing";
 
   function buildPayload() {
@@ -46,9 +49,15 @@ export default function BroadcastForm() {
       user_number_list: form.userList,
       message: {
         content: form.content,
-        ai_auto_spin: false,
+        ai_auto_spin: form.aiAutoSpin,
       },
-      attachments: form.attachments.map((a) => ({ url: a.url, name: a.name })),
+      attachments: form.attachments.map((attachment) => ({
+        url: attachment.url,
+        name: attachment.name,
+        bucket: attachment.bucket || "attachments",
+        path: attachment.path,
+        size: attachment.size,
+      })),
       speed_min: form.speedMin,
       speed_max: form.speedMax,
     };
@@ -82,10 +91,21 @@ export default function BroadcastForm() {
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
+    const uploadedPaths = form.attachments.map((attachment) => attachment.path).filter(Boolean);
     setForm(initialState);
     setSubmitError(null);
     reset();
+
+    await Promise.allSettled(
+      uploadedPaths.map((path) =>
+        fetch("/api/delete-attachment", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        })
+      )
+    );
   }
 
   return (
@@ -103,11 +123,14 @@ export default function BroadcastForm() {
       <MessageComposer
         content={form.content}
         onChange={(content) => setForm((f) => ({ ...f, content }))}
+        aiAutoSpin={form.aiAutoSpin}
+        onAiAutoSpinChange={(aiAutoSpin) => setForm((f) => ({ ...f, aiAutoSpin }))}
       />
 
       <AttachmentUploader
         attachments={form.attachments}
         onChange={(attachments) => setForm((f) => ({ ...f, attachments }))}
+        onUploadingChange={setUploadingAttachments}
       />
 
       <SpeedControl
@@ -120,7 +143,7 @@ export default function BroadcastForm() {
 
       <div className="submit-bar">
         <button type="submit" className="btn btn-primary btn-lg" disabled={!canSubmit}>
-          {submitting ? "Đang gửi yêu cầu..." : "Gửi tin nhắn"}
+          {submitting ? "Đang gửi yêu cầu..." : uploadingAttachments ? "Đang upload ảnh..." : "Gửi tin nhắn"}
         </button>
         <button type="button" className="btn btn-ghost" onClick={handleReset}>
           Làm mới form
@@ -147,6 +170,14 @@ function JobStatusBanner({ jobState }) {
 
   if (jobState.status === "done") {
     return <JobResultDashboard result={jobState.result} jobId={jobState.jobId} />;
+  }
+
+  if (jobState.status === "pending_review") {
+    return (
+      <div className="status-banner status-banner-processing">
+        {jobState.errorMessage}
+      </div>
+    );
   }
 
   if (jobState.status === "error") {
