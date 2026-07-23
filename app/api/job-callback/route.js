@@ -27,6 +27,8 @@ export async function POST(req) {
   if (result !== null && (typeof result !== "object" || Array.isArray(result))) {
     return NextResponse.json({ error: "result phải là object JSON." }, { status: 400 });
   }
+  const resultValidationError = validateCallbackResult(status, result);
+  if (resultValidationError) return NextResponse.json({ error: resultValidationError }, { status: 400 });
 
   const { data, error } = await supabaseAdmin.rpc("settle_broadcast_job", {
     p_job_id: jobId,
@@ -36,9 +38,27 @@ export async function POST(req) {
   });
   if (error) {
     console.error("[/api/job-callback] Lỗi settlement:", error.message);
-    const statusCode = error.message?.includes("JOB_NOT_FOUND") ? 404 : 500;
-    return NextResponse.json({ error: statusCode === 404 ? "Không tìm thấy job." : "Không thể hoàn tất job." }, { status: statusCode });
+    const clientError = ["INVALID_RESULT_DETAILS", "INVALID_SUCCESS_COUNT"].some((code) => error.message?.includes(code));
+    const statusCode = error.message?.includes("JOB_NOT_FOUND") ? 404 : clientError ? 400 : 500;
+    return NextResponse.json({ error: statusCode === 404 ? "Không tìm thấy job." : clientError ? "Kết quả callback không khớp với job." : "Không thể hoàn tất job." }, { status: statusCode });
   }
 
   return NextResponse.json({ ok: true, ...data });
+}
+
+function validateCallbackResult(status, result) {
+  if (status !== "done") return null;
+  if (!result || !Array.isArray(result.details)) {
+    return "Job hoàn tất phải có result.details là danh sách kết quả theo từng số điện thoại.";
+  }
+  if (result.details.length > 200) return "result.details vượt quá số lượng cho phép.";
+  for (const detail of result.details) {
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+      return "Mỗi phần tử result.details phải là object.";
+    }
+    if ("send_add_friend_request" in detail && typeof detail.send_add_friend_request !== "boolean") {
+      return "send_add_friend_request phải là boolean.";
+    }
+  }
+  return null;
 }

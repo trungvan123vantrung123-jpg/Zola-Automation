@@ -161,8 +161,7 @@ create policy "Khách xem lịch sử dùng của chính mình"
 -- thêm tài nguyên mới sau khi quét QR xong) và customer_profiles
 -- (để trang tự cập nhật khi admin duyệt tài khoản / trừ quota)
 -- ------------------------------------------------------------
-alter publication supabase_realtime add table assets;
-alter publication supabase_realtime add table customer_profiles;
+-- Realtime được đăng ký bằng block idempotent ở phần hardening bên dưới.
 
 -- ------------------------------------------------------------
 -- GHI CHÚ: cách admin duyệt tài khoản demo thủ công (giai đoạn hiện tại)
@@ -242,9 +241,9 @@ alter table usage_logs add constraint usage_logs_amount_check check (amount_used
 create unique index if not exists idx_usage_logs_job_unique on usage_logs(job_id) where job_id is not null;
 
 -- Replace the broad job read policy with owner-only reads.
-drop policy if exists "Cho ph�p �?c jobs" on jobs;
-drop policy if exists "Kh�ch xem jobs c?a ch�nh m?nh" on jobs;
-create policy "Kh�ch xem jobs c?a ch�nh m?nh" on jobs for select using (auth.uid() = customer_id);
+drop policy if exists "Cho ph�p �?c jobs" on jobs;
+drop policy if exists "Kh�ch xem jobs c?a ch�nh m?nh" on jobs;
+create policy "Kh�ch xem jobs c?a ch�nh m?nh" on jobs for select using (auth.uid() = customer_id);
 
 -- Uploads go through authenticated server APIs only.
 drop policy if exists "Public upload attachments" on storage.objects;
@@ -308,6 +307,130 @@ begin
   return jsonb_build_object('settled',true);
 end $$;
 
+revoke all on function create_broadcast_job(uuid,jsonb,int) from public;
+revoke all on function fail_broadcast_dispatch(uuid,text) from public;
+revoke all on function settle_broadcast_job(uuid,text,jsonb,text) from public;
+grant execute on function create_broadcast_job(uuid,jsonb,int),fail_broadcast_dispatch(uuid,text),settle_broadcast_job(uuid,text,jsonb,text) to service_role;
+
+-- ============================================================
+-- DAILY ASSET FRIEND-REQUEST SAFETY CAP (Asia/Ho_Chi_Minh)
+-- ============================================================
+create table if not exists asset_daily_usage (
+  asset_id text not null,
+  usage_date date not null,
+  successful_count int not null default 0 check (successful_count >= 0 and successful_count <= 50),
+  reserved_count int not null default 0 check (reserved_count >= 0 and reserved_count <= 50),
+  updated_at timestamptz not null default now(),
+  primary key (asset_id, usage_date),
+  check (successful_count + reserved_count <= 50)
+);
+
+alter table jobs add column if not exists asset_id text;
+alter table jobs add column if not exists daily_usage_date date;
+alter table jobs add column if not exists daily_reserved_count int not null default 0;
+alter table jobs drop constraint if exists jobs_daily_reserved_check;
+alter table jobs add constraint jobs_daily_reserved_check check (daily_reserved_count >= 0 and daily_reserved_count <= 50);
+create index if not exists idx_jobs_asset_usage_date on jobs(asset_id, daily_usage_date);
+alter table asset_daily_usage enable row level security;
+
+-- The previous implementation returned uuid; PostgreSQL cannot change a function
+-- return type via CREATE OR REPLACE, so remove only this exact signature first.
+drop function if exists create_broadcast_job(uuid, jsonb, int);
+
+create or replace function create_broadcast_job(p_customer_id uuid, p_input jsonb, p_requested_amount int)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare
+  v_profile customer_profiles%rowtype;
+  v_job_id uuid;
+  v_asset_id text;
+  v_usage_date date := (now() at time zone 'Asia/Ho_Chi_Minh')::date;
+  v_daily asset_daily_usage%rowtype;
+  v_quota_available int;
+  v_daily_available int;
+begin
+  if p_requested_amount <= 0 or p_requested_amount > 200 then raise exception 'INVALID_AMOUNT'; end if;
+  v_asset_id := nullif(trim(coalesce(p_input->>'asset_id','')), '');
+  if v_asset_id is null then raise exception 'INVALID_ASSET'; end if;
+
+  select * into v_profile from customer_profiles where id=p_customer_id for update;
+  if not found then raise exception 'PROFILE_NOT_FOUND'; end if;
+  if v_profile.status <> 'active' then raise exception 'ACCOUNT_NOT_ACTIVE'; end if;
+  v_quota_available := greatest(v_profile.quota_limit-v_profile.quota_used-v_profile.quota_reserved, 0);
+  if p_requested_amount > v_quota_available then
+    raise exception 'INSUFFICIENT_QUOTA:%', v_quota_available;
+  end if;
+
+  insert into asset_daily_usage(asset_id, usage_date) values(v_asset_id, v_usage_date) on conflict do nothing;
+  select * into v_daily from asset_daily_usage where asset_id=v_asset_id and usage_date=v_usage_date for update;
+  v_daily_available := greatest(50-v_daily.successful_count-v_daily.reserved_count, 0);
+  if p_requested_amount > v_daily_available then
+    raise exception 'DAILY_ASSET_CAP:%:%', v_daily_available, v_usage_date;
+  end if;
+
+  update customer_profiles set quota_reserved=quota_reserved+p_requested_amount where id=p_customer_id;
+  update asset_daily_usage set reserved_count=reserved_count+p_requested_amount, updated_at=now() where asset_id=v_asset_id and usage_date=v_usage_date;
+  insert into jobs(status,input,customer_id,requested_amount,quota_reserved,asset_id,daily_usage_date,daily_reserved_count)
+  values('processing',p_input,p_customer_id,p_requested_amount,p_requested_amount,v_asset_id,v_usage_date,p_requested_amount)
+  returning id into v_job_id;
+  return jsonb_build_object('job_id',v_job_id,'quota_available',v_quota_available-p_requested_amount,'daily_available',v_daily_available-p_requested_amount,'usage_date',v_usage_date);
+end $$;
+
+create or replace function fail_broadcast_dispatch(p_job_id uuid, p_error_message text)
+returns boolean language plpgsql security definer set search_path=public as $$
+declare v_job jobs%rowtype;
+begin
+  select * into v_job from jobs where id=p_job_id for update;
+  if not found or v_job.status <> 'processing' then return false; end if;
+  if v_job.customer_id is not null and v_job.quota_reserved > 0 then
+    update customer_profiles set quota_reserved=greatest(quota_reserved-v_job.quota_reserved,0) where id=v_job.customer_id;
+  end if;
+  if v_job.asset_id is not null and v_job.daily_usage_date is not null and v_job.daily_reserved_count > 0 then
+    update asset_daily_usage set reserved_count=greatest(reserved_count-v_job.daily_reserved_count,0),updated_at=now() where asset_id=v_job.asset_id and usage_date=v_job.daily_usage_date;
+  end if;
+  update jobs set status='error',error_message=left(coalesce(p_error_message,'Dispatch th?t b?i.'),2000),quota_reserved=0,daily_reserved_count=0 where id=p_job_id;
+  return true;
+end $$;
+
+create or replace function settle_broadcast_job(p_job_id uuid,p_status text,p_result jsonb default null,p_error_message text default null)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_job jobs%rowtype; v_reserved int; v_friend_successes int:=0;
+begin
+  if p_status not in ('done','error') then raise exception 'INVALID_STATUS'; end if;
+  select * into v_job from jobs where id=p_job_id for update;
+  if not found then raise exception 'JOB_NOT_FOUND'; end if;
+  if v_job.status <> 'processing' then return jsonb_build_object('settled',false,'note','Job already settled'); end if;
+  v_reserved:=greatest(coalesce(v_job.quota_reserved,0),0);
+
+  if p_status='done' then
+    if jsonb_typeof(coalesce(p_result->'details','null'::jsonb)) <> 'array' then raise exception 'INVALID_RESULT_DETAILS'; end if;
+    if jsonb_array_length(p_result->'details') > coalesce(v_job.daily_reserved_count,0) then raise exception 'INVALID_RESULT_DETAILS'; end if;
+    select count(*) into v_friend_successes from jsonb_array_elements(p_result->'details') detail where detail->'send_add_friend_request' = 'true'::jsonb;
+    if v_friend_successes > coalesce(v_job.daily_reserved_count,0) then raise exception 'INVALID_SUCCESS_COUNT'; end if;
+  end if;
+
+  if v_job.customer_id is not null and v_reserved > 0 then
+    if p_status='done' then
+      update customer_profiles set quota_reserved=greatest(quota_reserved-v_reserved,0),quota_used=quota_used+v_reserved where id=v_job.customer_id;
+      insert into usage_logs(customer_id,job_id,amount_used) values(v_job.customer_id,p_job_id,v_reserved) on conflict (job_id) where job_id is not null do nothing;
+      update customer_profiles set status='exhausted' where id=v_job.customer_id and quota_used>=quota_limit;
+    else
+      update customer_profiles set quota_reserved=greatest(quota_reserved-v_reserved,0) where id=v_job.customer_id;
+    end if;
+  end if;
+
+  if v_job.asset_id is not null and v_job.daily_usage_date is not null and v_job.daily_reserved_count > 0 then
+    update asset_daily_usage
+      set reserved_count=greatest(reserved_count-v_job.daily_reserved_count,0),
+          successful_count=successful_count+case when p_status='done' then v_friend_successes else 0 end,
+          updated_at=now()
+      where asset_id=v_job.asset_id and usage_date=v_job.daily_usage_date;
+  end if;
+
+  update jobs set status=p_status,result=p_result,error_message=case when p_status='error' then left(coalesce(p_error_message,'X? l? th?t b?i.'),2000) else null end,quota_reserved=0,daily_reserved_count=0 where id=p_job_id;
+  return jsonb_build_object('settled',true,'friend_request_successes',v_friend_successes);
+end $$;
+
+revoke all on table asset_daily_usage from public;
 revoke all on function create_broadcast_job(uuid,jsonb,int) from public;
 revoke all on function fail_broadcast_dispatch(uuid,text) from public;
 revoke all on function settle_broadcast_job(uuid,text,jsonb,text) from public;

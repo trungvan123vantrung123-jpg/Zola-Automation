@@ -15,12 +15,18 @@ export async function POST(req) {
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
 
   const requestedAmount = payload.user_number_list.length;
-  const { data: jobId, error: createError } = await supabaseAdmin.rpc("create_broadcast_job", {
+  const { data: createdJob, error: createError } = await supabaseAdmin.rpc("create_broadcast_job", {
     p_customer_id: user.id,
     p_input: payload,
     p_requested_amount: requestedAmount,
   });
   if (createError) return handleCreateError(createError);
+
+  const jobId = createdJob?.job_id;
+  if (typeof jobId !== "string") {
+    console.error("[/api/submit] RPC tạo job trả về dữ liệu không hợp lệ.");
+    return NextResponse.json({ error: "Không tạo được job xử lý." }, { status: 500 });
+  }
 
   const n8nUrl = process.env.N8N_SEND_MESSAGE_WEBHOOK_URL;
   const webhookSecret = process.env.N8N_WEBHOOK_SECRET;
@@ -47,7 +53,7 @@ export async function POST(req) {
   }
 
   await supabaseAdmin.from("jobs").update({ dispatched_at: new Date().toISOString() }).eq("id", jobId).eq("status", "processing");
-  return NextResponse.json({ job_id: jobId, status: "processing" });
+  return NextResponse.json({ job_id: jobId, status: "processing", limits: { quota_available: createdJob.quota_available, daily_available: createdJob.daily_available, usage_date: createdJob.usage_date } });
 }
 
 async function failDispatch(jobId, message) {
@@ -57,11 +63,23 @@ async function failDispatch(jobId, message) {
 
 function handleCreateError(error) {
   const message = error.message || "";
-  if (message.includes("INSUFFICIENT_QUOTA")) return NextResponse.json({ error: "Số lượt còn lại không đủ cho chiến dịch này." }, { status: 403 });
+  if (message.includes("INSUFFICIENT_QUOTA")) {
+    const available = extractLimit(message, "INSUFFICIENT_QUOTA");
+    return NextResponse.json({ error: `Số lượt còn lại của bạn là ${available}. Bạn chỉ có thể nhập tối đa ${available} số điện thoại.`, code: "INSUFFICIENT_QUOTA", available }, { status: 403 });
+  }
+  if (message.includes("DAILY_ASSET_CAP")) {
+    const [, available = "0", usageDate] = message.match(/DAILY_ASSET_CAP:([0-9]+):([0-9-]+)/) || [];
+    return NextResponse.json({ error: "Asset này đã đạt giới hạn 50 lời mời kết bạn thành công hôm nay. Hãy cân nhắc tiếp tục vào ngày mai để giảm nguy cơ bị khóa tài khoản.", code: "DAILY_ASSET_CAP", available: Number(available), usage_date: usageDate || null }, { status: 429 });
+  }
   if (message.includes("ACCOUNT_NOT_ACTIVE")) return NextResponse.json({ error: "Tài khoản không ở trạng thái được phép gửi tin." }, { status: 403 });
   if (message.includes("PROFILE_NOT_FOUND")) return NextResponse.json({ error: "Không tìm thấy hồ sơ khách hàng." }, { status: 404 });
   console.error("[/api/submit] Không tạo được job:", message);
   return NextResponse.json({ error: "Không tạo được job xử lý." }, { status: 500 });
+}
+
+function extractLimit(message, code) {
+  const match = message.match(new RegExp(`${code}:([0-9]+)`));
+  return Number(match?.[1] || 0);
 }
 
 function validatePayload(payload) {

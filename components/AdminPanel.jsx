@@ -37,6 +37,8 @@ export default function AdminPanel() {
         return;
       }
       setCustomers(data.customers);
+      sessionStorage.setItem("admin_secret", secret);
+      setUnlocked(true);
     } catch (err) {
       setError("Không kết nối được máy chủ.");
     } finally {
@@ -46,8 +48,8 @@ export default function AdminPanel() {
 
   function handleUnlock(e) {
     e.preventDefault();
-    sessionStorage.setItem("admin_secret", secret);
-    setUnlocked(true);
+    if (!secret.trim()) return;
+    loadCustomers();
   }
 
   async function updateCustomer(customerId, fields) {
@@ -99,8 +101,23 @@ export default function AdminPanel() {
   return (
     <div className="admin-shell">
       <header className="page-header">
-        <p className="page-eyebrow">Quản trị</p>
-        <h1 className="page-title">Danh sách khách hàng</h1>
+        <div>
+          <p className="page-eyebrow">Quản trị</p>
+          <h1 className="page-title">Danh sách khách hàng</h1>
+        </div>
+        <button
+          id="admin-lock-session"
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            sessionStorage.removeItem("admin_secret");
+            setSecret("");
+            setCustomers([]);
+            setUnlocked(false);
+          }}
+        >
+          Khoá phiên quản trị
+        </button>
       </header>
 
       {error && <p className="field-error">{error}</p>}
