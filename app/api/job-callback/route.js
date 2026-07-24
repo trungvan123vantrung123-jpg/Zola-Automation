@@ -38,7 +38,7 @@ export async function POST(req) {
   });
   if (error) {
     console.error("[/api/job-callback] Lỗi settlement:", error.message);
-    const clientError = ["INVALID_RESULT_DETAILS", "INVALID_SUCCESS_COUNT"].some((code) => error.message?.includes(code));
+    const clientError = ["INVALID_RESULT_DETAILS", "INVALID_SUCCESS_COUNT", "INVALID_RESULT_RECIPIENT"].some((code) => error.message?.includes(code));
     const statusCode = error.message?.includes("JOB_NOT_FOUND") ? 404 : clientError ? 400 : 500;
     return NextResponse.json({ error: statusCode === 404 ? "Không tìm thấy job." : clientError ? "Kết quả callback không khớp với job." : "Không thể hoàn tất job." }, { status: statusCode });
   }
@@ -46,19 +46,27 @@ export async function POST(req) {
   return NextResponse.json({ ok: true, ...data });
 }
 
+export async function DELETE(req) {
+  const expectedSecret = process.env.N8N_WEBHOOK_SECRET;
+  if (!expectedSecret || req.headers.get("x-webhook-secret") !== expectedSecret) return NextResponse.json({ error: "Không có quyền." }, { status: 401 });
+  const { data, error } = await supabaseAdmin.rpc("expire_stale_broadcast_jobs", { p_before: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() });
+  if (error) {
+    console.error("[/api/job-callback] Lỗi expiry reconciliation:", error.message);
+    return NextResponse.json({ error: "Không thể đối soát job quá hạn." }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, expired_jobs: data || 0 });
+}
+
 function validateCallbackResult(status, result) {
   if (status !== "done") return null;
-  if (!result || !Array.isArray(result.details)) {
-    return "Job hoàn tất phải có result.details là danh sách kết quả theo từng số điện thoại.";
-  }
+  if (!result || !Array.isArray(result.details)) return "Job hoàn tất phải có result.details là danh sách kết quả theo từng số điện thoại.";
   if (result.details.length > 200) return "result.details vượt quá số lượng cho phép.";
+  const recipients = new Set();
   for (const detail of result.details) {
-    if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
-      return "Mỗi phần tử result.details phải là object.";
-    }
-    if ("send_add_friend_request" in detail && typeof detail.send_add_friend_request !== "boolean") {
-      return "send_add_friend_request phải là boolean.";
-    }
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) return "Mỗi phần tử result.details phải là object.";
+    if (typeof detail.user_number !== "string" || !detail.user_number.trim() || recipients.has(detail.user_number.trim())) return "Mỗi kết quả phải có user_number duy nhất.";
+    recipients.add(detail.user_number.trim());
+    if ("send_add_friend_request" in detail && typeof detail.send_add_friend_request !== "boolean") return "send_add_friend_request phải là boolean.";
   }
   return null;
 }

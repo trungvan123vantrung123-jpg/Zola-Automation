@@ -6,6 +6,7 @@ export default function AdminPanel() {
   const [secret, setSecret] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -26,17 +27,19 @@ export default function AdminPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/customers", {
-        headers: { "x-admin-secret": secret },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Không tải được danh sách.");
+      const [customersResponse, assetsResponse] = await Promise.all([
+        fetch("/api/admin/customers", { headers: { "x-admin-secret": secret } }),
+        fetch("/api/admin/assets", { headers: { "x-admin-secret": secret } }),
+      ]);
+      const [customerData, assetData] = await Promise.all([customersResponse.json(), assetsResponse.json()]);
+      if (!customersResponse.ok || !assetsResponse.ok) {
+        setError(customerData.error || assetData.error || "Không tải được danh sách.");
         setUnlocked(false);
         sessionStorage.removeItem("admin_secret");
         return;
       }
-      setCustomers(data.customers);
+      setCustomers(customerData.customers);
+      setAssets(assetData.assets);
       sessionStorage.setItem("admin_secret", secret);
       setUnlocked(true);
     } catch (err) {
@@ -72,6 +75,22 @@ export default function AdminPanel() {
         prev.map((c) => (c.id === customerId ? { ...c, ...data.customer } : c))
       );
     } catch (err) {
+      setError("Không kết nối được máy chủ.");
+    }
+  }
+
+  async function updateAssetOwner(assetId, ownerId) {
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/assets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-admin-secret": secret },
+        body: JSON.stringify({ asset_id: assetId, owner_id: ownerId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Cập nhật chủ sở hữu thất bại."); return; }
+      setAssets((previous) => previous.map((asset) => asset.asset_id === assetId ? data.asset : asset));
+    } catch {
       setError("Không kết nối được máy chủ.");
     }
   }
@@ -113,6 +132,7 @@ export default function AdminPanel() {
             sessionStorage.removeItem("admin_secret");
             setSecret("");
             setCustomers([]);
+            setAssets([]);
             setUnlocked(false);
           }}
         >
@@ -141,6 +161,22 @@ export default function AdminPanel() {
           </tbody>
         </table>
       </div>
+
+      <section className="admin-table-wrap" aria-labelledby="admin-assets-title">
+        <div className="result-heading-row">
+          <div>
+            <p className="page-eyebrow">Phân vùng tài nguyên</p>
+            <h2 id="admin-assets-title" className="panel-title">Gán chủ sở hữu asset</h2>
+          </div>
+        </div>
+        <table className="admin-table">
+          <thead><tr><th>Tài nguyên</th><th>Trạng thái</th><th>Chủ sở hữu</th><th>Hành động</th></tr></thead>
+          <tbody>
+            {assets.map((asset) => <AssetOwnerRow key={asset.asset_id} asset={asset} customers={customers} onUpdate={updateAssetOwner} />)}
+          </tbody>
+        </table>
+        {!assets.length && <p className="field-hint">Chưa có tài nguyên nào.</p>}
+      </section>
     </div>
   );
 }
@@ -214,6 +250,23 @@ function CustomerRow({ customer, onUpdate }) {
           </button>
         )}
       </td>
+    </tr>
+  );
+}
+
+function AssetOwnerRow({ asset, customers, onUpdate }) {
+  const [ownerId, setOwnerId] = useState(asset.owner_id || "");
+  return (
+    <tr>
+      <td>{asset.asset_name} <code>{asset.asset_id}</code></td>
+      <td><span className={`status-pill status-pill-${asset.status}`}>{asset.status}</span></td>
+      <td>
+        <select className="select-input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+          <option value="">Ch�a g�n � kh�ng kh? d?ng</option>
+          {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.email}</option>)}
+        </select>
+      </td>
+      <td className="admin-actions-cell"><button type="button" className="btn btn-secondary" onClick={() => onUpdate(asset.asset_id, ownerId)}>L�u ch? s? h?u</button></td>
     </tr>
   );
 }

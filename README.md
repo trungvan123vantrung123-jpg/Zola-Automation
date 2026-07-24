@@ -90,10 +90,25 @@ mãi ở trạng thái `processing` và quota không bị trừ.
 **Route `/api/job-callback` tự chống trừ trùng lặp**: nếu n8n gọi lại (do retry mạng)
 cho cùng 1 `job_id` đã xử lý xong trước đó, route sẽ bỏ qua, không trừ quota lần 2.
 
-### c) Workflow đăng nhập QR (ghi vào bảng `assets`, không đổi so với trước)
+### c) Workflow đăng nhập QR (ghi vào bảng `assets`)
 
-Trigger từ nút "Đăng nhập" trên web → n8n trả QR → sau khi quét xong, n8n `INSERT`
-vào bảng `assets`. Trang Vùng 1 tự cập nhật nhờ Supabase Realtime.
+Mỗi asset **bắt buộc** phải được gán cho đúng tài khoản khách hàng. Khi workflow QR
+được khởi tạo từ web, hãy truyền `owner_id` (UUID Supabase Auth của khách) xuyên suốt
+workflow; node Supabase insert/upsert cuối cùng phải ghi tối thiểu:
+
+```json
+{
+  "asset_id": "id-duy-nhat-cua-tai-khoan-zalo",
+  "asset_name": "Tên hiển thị",
+  "status": "active",
+  "owner_id": "UUID-cua-auth-user"
+}
+```
+
+Không tạo asset chỉ với `asset_id`/`asset_name`: asset không có `owner_id` sẽ bị ẩn và
+không thể dùng bởi khách hàng. Admin có thể gán các asset cũ tại `/admin` trong phần
+**Gán chủ sở hữu asset**. Sau khi gán, trang Vùng 1 của đúng khách hàng tự cập nhật qua
+Realtime; các khách khác không thể thấy hoặc submit asset đó.
 
 ## 5. Trang quản trị `/admin`
 
@@ -123,12 +138,34 @@ ngay", kèm các lớp chống lạm dụng cần thêm trước khi bỏ bướ
     "ai_auto_spin": false
   },
   "attachments": [
-    { "url": "https://xxxx.supabase.co/storage/v1/object/public/attachments/uploads/xxx.jpg", "name": "anh1.jpg" }
+    {
+      "url": "https://xxxx.supabase.co/storage/v1/object/sign/attachments/uploads/<user-id>/xxx.jpg?token=...",
+      "name": "anh1.jpg",
+      "bucket": "attachments",
+      "path": "uploads/<user-id>/xxx.jpg"
+    }
   ],
   "speed_min": 1,
   "speed_max": 2
 }
 ```
+
+> [!IMPORTANT]
+> `attachments[].url` là **signed URL riêng tư**, chỉ có hiệu lực khoảng 60 phút. n8n phải
+> tải ảnh trong lúc xử lý workflow; không lưu hoặc dùng lại URL này ở workflow chạy muộn.
+> Không thay URL bằng URL do client tự truyền.
+
+### Đối soát job treo
+
+Tạo một n8n Cron chạy định kỳ (khuyến nghị mỗi 15 phút), gọi:
+
+```text
+DELETE https://<domain-app>/api/job-callback
+x-webhook-secret: <N8N_WEBHOOK_SECRET>
+```
+
+Endpoint này chỉ đánh dấu error và giải phóng reservation của job `processing` quá 2 giờ
+không callback. Callback `done`/`error` bình thường vẫn là `POST` như hướng dẫn phía trên.
 
 ## 8. Cấu trúc trạng thái job (bảng `jobs`, dùng cho polling)
 

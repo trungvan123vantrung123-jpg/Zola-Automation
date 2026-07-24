@@ -12,7 +12,9 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin.from("assets")
     .select("asset_id, asset_name, status, created_at")
-    .eq("status", "active").order("created_at", { ascending: false });
+    .eq("owner_id", user.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
   if (error) {
     console.error("[/api/assets] Lỗi truy vấn Supabase:", error.message);
     return NextResponse.json({ error: "Không lấy được danh sách tài nguyên." }, { status: 500 });

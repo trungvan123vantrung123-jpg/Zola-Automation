@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 /**
@@ -18,9 +18,14 @@ export default function AssetSelector({ value, onChange }) {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  onChangeRef.current = onChange;
+  valueRef.current = value;
 
   useEffect(() => {
     let isMounted = true;
+    let channel;
 
     async function loadAssets() {
       setLoading(true);
@@ -31,7 +36,9 @@ export default function AssetSelector({ value, onChange }) {
         if (!res.ok) {
           setLoadError(data.error || "Không tải được danh sách tài nguyên.");
         } else {
-          setAssets(data.assets || []);
+          const nextAssets = data.assets || [];
+          setAssets(nextAssets);
+          if (valueRef.current && !nextAssets.some((asset) => asset.asset_id === valueRef.current)) onChangeRef.current(null);
         }
       } catch (err) {
         if (isMounted) setLoadError("Không kết nối được máy chủ.");
@@ -40,21 +47,25 @@ export default function AssetSelector({ value, onChange }) {
       }
     }
 
-    loadAssets();
+    async function subscribeToOwnedAssets() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!isMounted || !user) return;
+      channel = supabase
+        .channel(`assets-changes-${user.id}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "assets", filter: `owner_id=eq.${user.id}` },
+          () => loadAssets()
+        )
+        .subscribe();
+    }
 
-    // Lắng nghe thay đổi realtime trên bảng assets (khi n8n thêm/sửa sau khi quét QR)
-    const channel = supabase
-      .channel("assets-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "assets" },
-        () => loadAssets()
-      )
-      .subscribe();
+    loadAssets();
+    subscribeToOwnedAssets();
 
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 

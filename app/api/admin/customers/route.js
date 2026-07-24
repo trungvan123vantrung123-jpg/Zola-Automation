@@ -6,7 +6,7 @@ function checkAdminAuth(req) { return Boolean(process.env.ADMIN_SECRET) && req.h
 
 export async function GET(req) {
   if (!checkAdminAuth(req)) return NextResponse.json({ error: "Không có quyền." }, { status: 401 });
-  const { data, error } = await supabaseAdmin.from("customer_profiles").select("id, email, status, quota_limit, quota_used, note, created_at").order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin.from("customer_profiles").select("id, email, status, quota_limit, quota_used, quota_reserved, note, created_at").order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: "Không tải được danh sách." }, { status: 500 });
   return NextResponse.json({ customers: data });
 }
@@ -25,6 +25,11 @@ export async function PATCH(req) {
   if (quotaLimit !== undefined) updateFields.quota_limit = quotaLimit;
   if (note !== undefined) updateFields.note = note;
   if (Object.keys(updateFields).length === 0) return NextResponse.json({ error: "Không có trường nào để cập nhật." }, { status: 400 });
+  if (quotaLimit !== undefined) {
+    const { data: existing, error: lookupError } = await supabaseAdmin.from("customer_profiles").select("quota_used, quota_reserved").eq("id", customerId).single();
+    if (lookupError || !existing) return NextResponse.json({ error: "Không tìm thấy khách hàng." }, { status: 404 });
+    if (quotaLimit < existing.quota_used + existing.quota_reserved) return NextResponse.json({ error: `Quota mới không thể thấp hơn ${existing.quota_used + existing.quota_reserved} lượt đã dùng hoặc đang giữ.` }, { status: 400 });
+  }
   const { data, error } = await supabaseAdmin.from("customer_profiles").update(updateFields).eq("id", customerId).select().single();
   if (error) return NextResponse.json({ error: "Cập nhật thất bại." }, { status: 500 });
   return NextResponse.json({ customer: data });

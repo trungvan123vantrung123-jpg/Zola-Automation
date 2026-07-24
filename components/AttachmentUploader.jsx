@@ -5,11 +5,11 @@ import { useRef, useState } from "react";
 /**
  * Vùng 4 - Đính kèm ảnh.
  * Mỗi ảnh chọn sẽ được upload NGAY lên /api/upload-attachment (Supabase Storage),
- * component chỉ giữ lại { url, name } đã upload thành công.
- * Khi submit form chính, chỉ cần gửi mảng URL này -> payload nhẹ, n8n tự tải ảnh khi cần.
+ * component chỉ giữ metadata upload thành công cùng URL xem trước có thời hạn.
+ * Khi submit form chính, server xác thực path và tự tạo URL có thời hạn cho n8n.
  *
  * Props:
- *  - attachments: { url: string, name: string }[]
+ *  - attachments: { url, name, path, bucket, size }[]
  *  - onChange: (list) => void
  */
 export default function AttachmentUploader({ attachments, onChange, onUploadingChange }) {
@@ -67,7 +67,7 @@ export default function AttachmentUploader({ attachments, onChange, onUploadingC
   }
 
   async function removeAttachment(attachment) {
-    onChange(attachments.filter((item) => item.url !== attachment.url));
+    onChange(attachments.filter((item) => item.path !== attachment.path));
     if (!attachment.path) return;
     try {
       await fetch("/api/delete-attachment", {
@@ -103,7 +103,7 @@ export default function AttachmentUploader({ attachments, onChange, onUploadingC
       {attachments.length > 0 && (
         <div className="attachment-grid">
           {attachments.map((a) => (
-            <div key={a.url} className="attachment-thumb">
+            <div key={a.path} className="attachment-thumb">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={a.url} alt={a.name} />
               <button
