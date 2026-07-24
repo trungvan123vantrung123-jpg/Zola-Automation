@@ -445,12 +445,16 @@ alter table assets add column if not exists owner_id uuid references customer_pr
 create index if not exists idx_assets_owner_status_created on assets(owner_id, status, created_at desc);
 
 -- Remove the historical public read policy and enforce direct owner-only reads.
-drop policy if exists "Cho phép ð?c assets" on assets;
-drop policy if exists "Khách xem assets c?a chính m?nh" on assets;
-create policy "Khách xem assets c?a chính m?nh" on assets for select using (auth.uid() = owner_id);
+drop policy if exists "Cho phï¿½p ï¿½?c assets" on assets;
+drop policy if exists "Khï¿½ch xem assets c?a chï¿½nh m?nh" on assets;
+create policy "Khï¿½ch xem assets c?a chï¿½nh m?nh" on assets for select using (auth.uid() = owner_id);
 
 -- The job RPC is the authoritative server-side boundary. It verifies the supplied
 -- asset is active and owned by the authenticated customer before reserving quota.
+-- The initial rollout used a uuid return type. PostgreSQL cannot change a
+-- function return type with CREATE OR REPLACE, so drop the exact signature first.
+-- The function is recreated immediately below and permissions are granted again.
+drop function if exists create_broadcast_job(uuid, jsonb, integer);
 create or replace function create_broadcast_job(p_customer_id uuid, p_input jsonb, p_requested_amount int)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare
