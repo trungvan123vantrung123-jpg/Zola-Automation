@@ -258,6 +258,10 @@ do $$ begin
   end if;
 end $$;
 
+-- Compatibility bridge for rerunning the full historical schema. A database may
+-- already contain the newer jsonb-returning function; remove the exact signature
+-- before this legacy uuid-returning declaration is evaluated below.
+drop function if exists create_broadcast_job(uuid, jsonb, integer);
 create or replace function create_broadcast_job(p_customer_id uuid, p_input jsonb, p_requested_amount int)
 returns uuid language plpgsql security definer set search_path=public as $$
 declare v_profile customer_profiles%rowtype; v_job_id uuid;
